@@ -1,0 +1,7 @@
+# Copy to terraform.tfvars (git-ignored) and fill in. vms-aws.ps1 passes allowed_cidr for you.
+alert_email = "you@example.com"
+
+# Optional overrides — every default already stays inside the Free Tier.
+# region   = "ap-south-1"
+# repo_url = "https://github.com/DevikaaMenon/Gatehouse-VMS.git"
+# repo_ref = "main"

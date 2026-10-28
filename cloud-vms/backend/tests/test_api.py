@@ -184,6 +184,19 @@ def test_storage_key_validation():
             validate_key(bad)
 
 
+def test_routed_storage_sends_only_listed_folders_to_s3(tmp_path):
+    from app.services.storage import InvalidKey, LocalStorage, RoutedStorage
+    remote, local = LocalStorage(tmp_path / "s3"), LocalStorage(tmp_path / "local")
+    st = RoutedStorage(remote, local, ["evidence", "snapshots/"])
+    st.put_bytes("evidence/1/2026-10-27/5/clip.mp4", b"clip", "video/mp4")
+    st.put_bytes("thumbnails/1/latest.jpg", b"jpg", "image/jpeg")
+    assert remote.exists("evidence/1/2026-10-27/5/clip.mp4") and not local.exists("evidence/1/2026-10-27/5/clip.mp4")
+    assert local.exists("thumbnails/1/latest.jpg") and not remote.exists("thumbnails/1/latest.jpg")
+    assert st.local_path("thumbnails/1/latest.jpg") == local.local_path("thumbnails/1/latest.jpg")
+    with pytest.raises(InvalidKey):
+        st.put_bytes("../escape.jpg", b"x", "image/jpeg")
+
+
 def test_analytics_summary_counts_unique_entries(client, admin):
     from app.core.timeutil import utcnow
     from app.db import session_scope

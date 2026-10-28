@@ -12,6 +12,82 @@ Browser ──► ALB / EC2 API (FastAPI + React UI) ──► RDS, S3 (presigne
 Logs: CloudWatch Logs (awslogs driver)
 ```
 
+## 0. Free Tier deployment with Terraform (recommended)
+
+`terraform/` builds the architecture above on one AWS account without leaving the Free Tier,
+and `vms-aws.ps1` drives it from Windows PowerShell.
+
+| Resource | Size | Free Tier allowance |
+|---|---|---|
+| EC2 (API + dashboard + AI workers in Docker) | `t3.micro`, CPU credits **standard**, 30 GB gp3 | 750 h/month, 30 GB EBS |
+| RDS PostgreSQL 16 | `db.t4g.micro`, single-AZ, 20 GB gp2, private, 1-day backups | 750 h/month, 20 GB + 20 GB backup |
+| S3 | evidence clips + snapshots only, expire after 30 days | 5 GB, 2,000 PUT, 20,000 GET |
+| CloudWatch Logs | 7-day retention | 5 GB |
+| SSM Parameter Store | 3 SecureString parameters (standard tier) | always free |
+| AWS Budgets | $5/month incl. credits; emails at $1 used and if the month is forecast past $5 | 2 budgets free |
+
+What keeps it free:
+
+* **No** NAT gateway, load balancer, Elastic IP, ElastiCache, Secrets Manager, Multi-AZ or
+  Performance Insights. Those are never free.
+* The database has no public endpoint. A second public IPv4 address would go over the 750 free hours.
+* `t3` instances default to *unlimited* CPU credits, which bill extra under sustained AI load.
+  Here they are *standard*, so the CPU slows down instead of costing money.
+* Only `evidence/` and `snapshots/` go to S3 (`VMS_S3_KEY_PREFIXES`). Thumbnails are rewritten every
+  15 s and recordings are cut into 1-minute segments, so either one would use up the 2,000 free PUTs
+  within days. They stay on the server disk, and recordings are kept for 2 days.
+* The dashboard is open only to your IP address (`allowed_cidr`), over plain HTTP. HTTPS needs a
+  domain plus a load balancer or reverse proxy, which is the next step.
+
+**Limits of a t3.micro (1 GB RAM, 2 burstable vCPUs):** good for the dashboard, storage and database
+parts, and for **one camera at a low analysis rate** (set *Frames analysed per second* to 1–2 when
+adding the camera). Once its CPU credits are used up, the AI slows down considerably. For more cameras,
+see *Compute* below, which is not free.
+
+> **Which Free Tier do you have?** Accounts created before 15 July 2025 get the 12-month allowances
+> in the table. Newer accounts are on the credit-based *Free plan*, where the same resources are paid
+> for from your sign-up credits. In that case `.\vms-aws.ps1 stop` when you are not using it saves
+> credits. Check *Billing → Free Tier* in the console either way.
+
+### Steps (Windows)
+
+```powershell
+winget install Hashicorp.Terraform
+winget install Amazon.AWSCLI
+aws configure                    # access key of an IAM user (not the root account), region ap-south-1
+
+cd cloud-vms\infrastructure\aws
+copy terraform\terraform.tfvars.example terraform\terraform.tfvars   # then set alert_email in it
+.\vms-aws.ps1 check
+.\vms-aws.ps1 deploy             # shows the plan, type "yes"; ~10 min (the database is the slow part)
+.\vms-aws.ps1 status             # the first build on the server takes another 20-40 min
+.\vms-aws.ps1 password           # sign in as admin with this password
+```
+
+The server clones `repo_url` (default: this project on GitHub, branch `main`), so push your changes
+there first, then `.\vms-aws.ps1 update` rebuilds the server from the latest commit. Other commands:
+`logs [-Follow]`, `stop`, `start`, `destroy` (removes everything, including all videos and the database).
+If your home IP changes, run `deploy` again to allow the new one.
+
+### One-off demo (create, show, destroy)
+
+1. **The day before:** `deploy`, wait until `status` shows *Health: OK*, sign in, add the camera at
+   1–2 analysed frames per second and draw the lines/zones. **Leave it running.** A new t3.micro
+   starts with no CPU credits (the first build is slow for this reason). While idle it builds up
+   credits for about 2.4 hours of one full CPU, which is enough for the AI during the demo. Stopping
+   it keeps those credits for 7 days.
+2. **Before the demo:** `status` for the URL. On a different network (college Wi-Fi), run `deploy`
+   again; it only updates the firewall rule to your new IP.
+3. **Right after:** `destroy`. Nothing remains that could be billed. Videos, incidents and the
+   database are deleted with it.
+
+Shell access to the server, with no SSH port open:
+`aws ssm start-session --target <instance_id>` (needs the Session Manager plugin). The first-boot log is
+`/var/log/gatehouse-setup.log`.
+
+The rest of this guide describes the same setup step by step in the AWS console, plus larger
+options that are **not** free.
+
 ## 1. Storage and database
 
 1. **S3**: create a private bucket, e.g. `rvce-vms-<yourname>`, in `ap-south-1` (Mumbai).

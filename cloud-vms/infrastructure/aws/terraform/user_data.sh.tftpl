@@ -1,0 +1,54 @@
+#!/bin/bash
+# First boot of the Gatehouse server (Amazon Linux 2023). Rendered by Terraform; log: /var/log/gatehouse-setup.log
+set -euo pipefail
+exec > >(tee -a /var/log/gatehouse-setup.log) 2>&1
+
+# 1 GB of RAM is not enough to build the image or run PyTorch; swap on the (free) EBS disk makes up for it
+if [ ! -f /swapfile ]; then
+  fallocate -l 3G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+  echo '/swapfile none swap sw 0 0' >> /etc/fstab
+fi
+
+dnf install -y docker git
+systemctl enable --now docker
+
+mkdir -p /opt/gatehouse
+param() { aws ssm get-parameter --region "${region}" --with-decryption --name "${param_path}/$1" --query Parameter.Value --output text; }
+
+umask 077
+cat > /opt/gatehouse/vms.env <<EOF
+VMS_ENVIRONMENT=production
+VMS_DATABASE_URL=postgresql+psycopg://${db_username}:$(param db_password)@${db_host}:5432/${db_name}?sslmode=require
+VMS_STORAGE_BACKEND=s3
+VMS_S3_BUCKET=${bucket}
+VMS_S3_REGION=${region}
+VMS_S3_KEY_PREFIXES=${s3_key_prefixes}
+VMS_SECRET_KEY=$(param secret_key)
+VMS_ADMIN_USERNAME=admin
+VMS_ADMIN_PASSWORD=$(param admin_password)
+VMS_TIMEZONE=${timezone}
+VMS_DEVICE=cpu
+VMS_INFERENCE_BATCH_SIZE=1
+VMS_RETENTION_RECORDINGS_DAYS=2
+VMS_RETENTION_EVIDENCE_DAYS=30
+EOF
+umask 022
+
+# deploy.sh: (re)build from git and restart. Also run by `vms-aws.ps1 update`.
+cat > /opt/gatehouse/deploy.sh <<'EOF'
+#!/bin/bash
+set -euo pipefail
+cd /opt/gatehouse
+if [ -d src/.git ]; then git -C src fetch --depth 1 origin "${repo_ref}" && git -C src reset --hard FETCH_HEAD
+else git clone --depth 1 --branch "${repo_ref}" "${repo_url}" src; fi
+docker build -f src/cloud-vms/infrastructure/docker/Dockerfile -t gatehouse src/cloud-vms
+docker rm -f gatehouse 2>/dev/null || true
+docker run -d --name gatehouse --restart unless-stopped --env-file /opt/gatehouse/vms.env \
+  -p 80:8000 -v gatehouse-data:/app/data \
+  --log-driver=awslogs --log-opt awslogs-region="${region}" --log-opt awslogs-group="${log_group}" \
+  --log-opt awslogs-stream=app gatehouse
+docker image prune -f
+echo "deployed $(git -C src rev-parse --short HEAD)"
+EOF
+chmod 700 /opt/gatehouse/deploy.sh
+/opt/gatehouse/deploy.sh

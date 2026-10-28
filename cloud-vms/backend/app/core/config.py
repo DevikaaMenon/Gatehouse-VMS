@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     s3_region: str = "ap-south-1"
     s3_endpoint_url: str = ""  # e.g. http://localhost:9000 for MinIO
     s3_prefix: str = ""
+    # with s3: only these top-level folders go to the bucket, the rest stay on local disk; [] = all.
+    # e.g. ["evidence", "snapshots"] keeps thumbnails and recording segments off S3 (free-tier PUTs)
+    s3_key_prefixes: list[str] = Field(default_factory=list)
 
     # ---- workers ---------------------------------------------------------
     embedded_workers: bool = True  # run camera workers inside the API process

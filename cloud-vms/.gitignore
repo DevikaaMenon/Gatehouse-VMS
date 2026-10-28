@@ -13,3 +13,8 @@ data/*
 !data/.gitkeep
 runs/
 .env
+
+# Terraform (state holds the generated passwords - never commit it)
+infrastructure/aws/terraform/.terraform/
+infrastructure/aws/terraform/*.tfstate*
+infrastructure/aws/terraform/terraform.tfvars

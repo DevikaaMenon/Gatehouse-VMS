@@ -1,0 +1,4 @@
+# Files that run on Linux (EC2 user data, Docker, launch scripts) must keep LF line endings,
+# even when checked out on Windows with core.autocrlf=true.
+*.sh text eol=lf
+*.tftpl text eol=lf

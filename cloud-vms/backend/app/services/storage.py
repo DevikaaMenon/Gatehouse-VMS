@@ -207,6 +207,41 @@ class S3Storage(Storage):
         return total
 
 
+class RoutedStorage(Storage):
+    """S3 for the listed top-level folders (e.g. evidence, snapshots), local disk for the rest.
+
+    Keeps high-frequency writes (thumbnails every 15 s, 1-minute recording segments) off S3, where
+    every PUT counts against the free tier, while incident evidence still lands in the bucket."""
+    backend = "s3+local"
+
+    def __init__(self, s3: Storage, local: Storage, s3_prefixes: list[str]):
+        self.s3, self.local, self.s3_prefixes = s3, local, {p.strip("/") for p in s3_prefixes}
+
+    def _pick(self, key: str) -> Storage:
+        return self.s3 if validate_key(key).split("/", 1)[0] in self.s3_prefixes else self.local
+
+    def put_file(self, key, path, content_type, move=False):
+        return self._pick(key).put_file(key, path, content_type, move=move)
+
+    def put_bytes(self, key, data, content_type):
+        return self._pick(key).put_bytes(key, data, content_type)
+
+    def delete(self, key):
+        self._pick(key).delete(key)
+
+    def exists(self, key):
+        return self._pick(key).exists(key)
+
+    def local_path(self, key):
+        return self._pick(key).local_path(key)
+
+    def signed_url(self, key, ttl=None):
+        return self._pick(key).signed_url(key, ttl)
+
+    def usage_bytes(self):
+        return self.s3.usage_bytes() + self.local.usage_bytes()
+
+
 _storage: Storage | None = None
 
 
@@ -218,6 +253,8 @@ def get_storage() -> Storage:
             if not s.s3_bucket:
                 raise RuntimeError("VMS_S3_BUCKET must be set when VMS_STORAGE_BACKEND=s3")
             _storage = S3Storage(s.s3_bucket, s.s3_region, s.s3_endpoint_url, s.s3_prefix)
+            if s.s3_key_prefixes:
+                _storage = RoutedStorage(_storage, LocalStorage(s.storage_dir), s.s3_key_prefixes)
         else:
             _storage = LocalStorage(s.storage_dir)
     return _storage
