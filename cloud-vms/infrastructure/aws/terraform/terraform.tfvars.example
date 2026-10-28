@@ -2,6 +2,6 @@
 alert_email = "you@example.com"
 
 # Optional overrides — every default already stays inside the Free Tier.
-# region   = "ap-south-1"
+# region   = "ap-south-1"   # default is ap-southeast-2 (Sydney): our organization blocks EC2 elsewhere
 # repo_url = "https://github.com/DevikaaMenon/Gatehouse-VMS.git"
 # repo_ref = "main"

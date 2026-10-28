@@ -8,8 +8,9 @@ variable "name" {
 }
 
 variable "region" {
-  type    = string
-  default = "ap-south-1" # Mumbai
+  description = "Our AWS account's organization only allows EC2 in Sydney; use ap-south-1 (Mumbai) elsewhere"
+  type        = string
+  default     = "ap-southeast-2"
 }
 
 variable "alert_email" {

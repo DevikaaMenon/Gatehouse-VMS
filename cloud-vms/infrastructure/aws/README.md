@@ -49,12 +49,17 @@ see *Compute* below, which is not free.
 > for from your sign-up credits. In that case `.\vms-aws.ps1 stop` when you are not using it saves
 > credits. Check *Billing → Free Tier* in the console either way.
 
+> **Region:** the default is `ap-southeast-2` (Sydney), because our AWS account belongs to an
+> organization whose service control policy blocks EC2 in every other region (even Mumbai). With an
+> account that allows it, set `region = "ap-south-1"` in `terraform.tfvars` for lower latency from India.
+> The app's own time zone (`VMS_TIMEZONE=Asia/Kolkata`) does not depend on the region.
+
 ### Steps (Windows)
 
 ```powershell
 winget install Hashicorp.Terraform
 winget install Amazon.AWSCLI
-aws configure                    # access key of an IAM user (not the root account), region ap-south-1
+aws configure                    # access key of an IAM user (not the root account), region ap-southeast-2
 
 cd cloud-vms\infrastructure\aws
 copy terraform\terraform.tfvars.example terraform\terraform.tfvars   # then set alert_email in it
