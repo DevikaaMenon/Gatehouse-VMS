@@ -27,11 +27,11 @@ function Need($exe, $hint) {
 }
 
 # run terraform / aws and stop on a non-zero exit code
-function Tf { & terraform "-chdir=$Tf" @args; if ($LASTEXITCODE -ne 0) { throw "terraform $($args[0]) failed" } }
-function Aws { & aws --region $script:Region @args; if ($LASTEXITCODE -ne 0) { throw "aws $($args[0]) $($args[1]) failed" } }
+function Invoke-Tf { & terraform.exe "-chdir=$Tf" @args; if ($LASTEXITCODE -ne 0) { throw "terraform $($args[0]) failed" } }
+function Invoke-Aws { & aws.exe --region $script:Region @args; if ($LASTEXITCODE -ne 0) { throw "aws $($args[0]) $($args[1]) failed" } }
 
 function Get-Out($name) {
-  $v = & terraform "-chdir=$Tf" output -raw $name 2>$null
+  $v = & terraform.exe "-chdir=$Tf" output -raw $name 2>$null
   if ($LASTEXITCODE -ne 0 -or -not $v) { throw "Nothing deployed yet (no '$name' output). Run: .\vms-aws.ps1 deploy" }
   return $v
 }
@@ -44,7 +44,7 @@ function Get-MyCidr {
 function Test-Setup {
   Need terraform "Install it with: winget install Hashicorp.Terraform"
   Need aws "Install it with: winget install Amazon.AWSCLI   then run: aws configure"
-  $account = & aws sts get-caller-identity --query Account --output text 2>$null
+  $account = & aws.exe sts get-caller-identity --query Account --output text 2>$null
   if ($LASTEXITCODE -ne 0) { throw "AWS credentials are not set up. Run: aws configure" }
   if (-not (Test-Path (Join-Path $Tf "terraform.tfvars"))) {
     throw "Copy $Tf\terraform.tfvars.example to terraform.tfvars and set alert_email first."
@@ -64,8 +64,8 @@ switch ($Command) {
     Test-Setup
     $cidr = Get-MyCidr
     Write-Host "The dashboard will be reachable from $cidr only."
-    Tf init -input=false
-    Tf apply "-var=allowed_cidr=$cidr"
+    Invoke-Tf init -input=false
+    Invoke-Tf apply "-var=allowed_cidr=$cidr"
     Write-Host ""
     Write-Host "The server is now building the app (first time: roughly 20-40 minutes on a t3.micro)." -ForegroundColor Yellow
     Write-Host "Check progress with:  .\vms-aws.ps1 status"
@@ -73,9 +73,9 @@ switch ($Command) {
 
   "status" {
     $id = Get-Out instance_id
-    $state, $ip = (Aws ec2 describe-instances --instance-ids $id `
+    $state, $ip = (Invoke-Aws ec2 describe-instances --instance-ids $id `
         --query "Reservations[0].Instances[0].[State.Name,PublicIpAddress]" --output text) -split "\s+"
-    $dbState = Aws rds describe-db-instances --db-instance-identifier (Get-Out db_identifier) `
+    $dbState = Invoke-Aws rds describe-db-instances --db-instance-identifier (Get-Out db_identifier) `
       --query "DBInstances[0].DBInstanceStatus" --output text
     Write-Host "Server:    $state"
     Write-Host "Database:  $dbState"
@@ -91,38 +91,38 @@ switch ($Command) {
   }
 
   "password" {
-    $pw = Aws ssm get-parameter --with-decryption --name (Get-Out admin_password_parameter) `
+    $pw = Invoke-Aws ssm get-parameter --with-decryption --name (Get-Out admin_password_parameter) `
       --query Parameter.Value --output text
     Write-Host "user name: admin"
     Write-Host "password:  $pw"
   }
 
   "logs" {
-    if ($Follow) { Aws logs tail (Get-Out log_group) --since 1h --follow }
-    else { Aws logs tail (Get-Out log_group) --since 1h }
+    if ($Follow) { Invoke-Aws logs tail (Get-Out log_group) --since 1h --follow }
+    else { Invoke-Aws logs tail (Get-Out log_group) --since 1h }
   }
 
   "update" {
-    $cmd = Aws ssm send-command --instance-ids (Get-Out instance_id) --document-name AWS-RunShellScript `
+    $cmd = Invoke-Aws ssm send-command --instance-ids (Get-Out instance_id) --document-name AWS-RunShellScript `
       --timeout-seconds 3600 --parameters "commands=/opt/gatehouse/deploy.sh" --comment "gatehouse update" `
       --query Command.CommandId --output text
     Write-Host "Rebuilding on the server (command $cmd). This takes several minutes; then run: .\vms-aws.ps1 status"
   }
 
   "stop" {
-    Aws ec2 stop-instances --instance-ids (Get-Out instance_id) --output text | Out-Null
-    Aws rds stop-db-instance --db-instance-identifier (Get-Out db_identifier) --output text | Out-Null
+    Invoke-Aws ec2 stop-instances --instance-ids (Get-Out instance_id) --output text | Out-Null
+    Invoke-Aws rds stop-db-instance --db-instance-identifier (Get-Out db_identifier) --output text | Out-Null
     Write-Host "Stopping. AWS starts a stopped database again by itself after 7 days." -ForegroundColor Yellow
   }
 
   "start" {
-    Aws rds start-db-instance --db-instance-identifier (Get-Out db_identifier) --output text | Out-Null
-    Aws ec2 start-instances --instance-ids (Get-Out instance_id) --output text | Out-Null
+    Invoke-Aws rds start-db-instance --db-instance-identifier (Get-Out db_identifier) --output text | Out-Null
+    Invoke-Aws ec2 start-instances --instance-ids (Get-Out instance_id) --output text | Out-Null
     Write-Host "Starting. The public IP changes after a stop; run .\vms-aws.ps1 status in a few minutes."
   }
 
   "destroy" {
     Test-Setup
-    Tf destroy "-var=allowed_cidr=$(Get-MyCidr)"
+    Invoke-Tf destroy "-var=allowed_cidr=$(Get-MyCidr)"
   }
 }
